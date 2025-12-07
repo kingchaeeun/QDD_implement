@@ -1,0 +1,90 @@
+import React, { useState, useEffect } from "react";
+
+interface SidePanelProps {
+  quoteId?: string;
+  quote?: string;
+}
+
+export const SidePanel: React.FC<SidePanelProps> = ({ quote }) => {
+  const [results, setResults] = useState<Array<any>>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    // Listen for messages from background script
+    chrome.runtime.onMessage.addListener((request, _sender, _sendResponse) => {
+      if (request.action === "start_loading") {
+        setIsLoading(true);
+        // 새 분석 시작 시 이전 결과는 유지해도 되지만,
+        // UX를 위해 비우고 싶다면 아래 주석을 해제
+        // setResults([]);
+      } else if (request.action === "display_results") {
+        setResults(request.data || []);
+        setIsLoading(false);
+      }
+    });
+
+    // 초기 로드 시, 백그라운드에 저장된 최신 결과가 있으면 가져오기
+    chrome.runtime.sendMessage({ action: "get_latest_results" }, (response) => {
+      if (response?.results && Array.isArray(response.results) && response.results.length > 0) {
+        setResults(response.results);
+        setIsLoading(Boolean(response.isLoading));
+      } else if (response?.isLoading) {
+        setIsLoading(true);
+      }
+    });
+  }, []);
+
+  return (
+    <div className="w-full h-full bg-background text-foreground flex flex-col">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-primary to-accent text-white p-4 shadow-md">
+        <h1 className="text-lg font-bold">원문 찾기</h1>
+        <p className="text-xs opacity-90">직접 인용문의 원문을 검색합니다</p>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {isLoading && (
+          <div className="flex justify-center items-center h-32">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary"></div>
+          </div>
+        )}
+
+        {!isLoading && results.length === 0 && (
+          <p className="text-center text-muted-foreground text-sm py-8">분석할 인용문을 클릭해주세요.</p>
+        )}
+
+        {!isLoading && results.length > 0 && (
+          <div className="space-y-3">
+            {results.map((result, idx) => (
+              <div key={idx} className="p-3 border border-border rounded-lg">
+                <div className="flex justify-between items-start gap-2 mb-1">
+                  <p className="text-xs font-medium line-clamp-3">
+                    "{result.original_span || result.quote || quote}"
+                  </p>
+                  <span
+                    className={`text-xs font-semibold px-2 py-1 rounded ${
+                      result.similarity_score >= 70
+                        ? "bg-green-100 text-green-800"
+                        : result.similarity_score >= 50
+                        ? "bg-blue-100 text-blue-800"
+                        : "bg-orange-100 text-orange-800"
+                    }`}
+                  >
+                    {result.similarity_score}%
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground truncate">{result.source_url}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="border-t border-border p-3 text-xs text-muted-foreground text-center">
+        <p>Quote Origin Pipeline © 2024</p>
+      </div>
+    </div>
+  );
+};

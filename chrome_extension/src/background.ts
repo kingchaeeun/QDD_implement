@@ -1,0 +1,73 @@
+// Background Service Worker
+class BackgroundManager {
+  private latestResults: any[] = [];
+  private isLoading = false;
+
+  initialize(): void {
+    chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+      console.log("[Background] Received message:", request.action);
+      if (request.action === "display_results") {
+        this.latestResults = request.data;
+        this.isLoading = false;
+        sendResponse({ success: true });
+      } else if (request.action === "get_latest_results") {
+        sendResponse({ results: this.latestResults, isLoading: this.isLoading });
+      } else if (request.action === "set_loading_state") {
+        this.isLoading = Boolean(request.isLoading);
+        sendResponse({ success: true });
+      } else if (request.action === "find_origin") {
+        this.handleFindOrigin(request.payload)
+          .then((data) => {
+            sendResponse({ success: true, data });
+          })
+          .catch((error) => {
+            console.error("[Background] Error in find_origin:", error);
+            sendResponse({ success: false, error: String(error) });
+          });
+        // 비동기 sendResponse 사용을 위해 true 반환
+        return true;
+      }
+    });
+  }
+
+  private async handleFindOrigin(payload: {
+    quote_id: string;
+    quote_content: string;
+    article_text: string;
+    article_url?: string;
+    article_title?: string;
+    keywords?: string[];
+  }): Promise<any> {
+    this.isLoading = true;
+
+    const response = await fetch("http://localhost:8000/api/find-origin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+
+    const json = await response.json();
+
+    // 백엔드 QuoteResponse를 사이드패널에서 바로 쓸 수 있는 형태로 변환
+    const candidates = Array.isArray(json.candidates) ? json.candidates : [];
+    const mappedResults = candidates.map((cand: any) => ({
+      quote_id: json.quote_id,
+      quote: json.quote_content, // 기존 UI에서 사용하던 필드명 유지
+      original_span: cand.original_span,
+      similarity_score: Math.round((cand.similarity_score ?? 0) * 100),
+      source_url: cand.source_url,
+    }));
+
+    this.latestResults = mappedResults;
+    this.isLoading = false;
+    return mappedResults;
+  }
+}
+
+const bgManager = new BackgroundManager();
+bgManager.initialize();

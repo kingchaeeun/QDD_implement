@@ -19,4 +19,4 @@ def translate_ko_to_en(text: str) -> str:
     logger.debug("Translation result: %s", out)
     return out
 
-print(translate_ko_to_en("트럼프 베네수엘라 상공 전면폐쇄"))  # For quick test
+# print(translate_ko_to_en("트럼프 베네수엘라 상공 전면폐쇄"))  # For quick test

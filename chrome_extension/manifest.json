@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Quote Origin Pipeline",
+  "version": "1.0.0",
+  "description": "Naver News 기사에서 직접 인용문의 원문을 찾아줍니다",
+  "permissions": ["sidePanel", "activeTab", "scripting"],
+  "host_permissions": ["https://n.news.naver.com/mnews/article/*", "http://localhost:8000/*", "http://localhost:8080/*"],
+  "action": {
+    "default_title": "Quote Origin Pipeline",
+    "default_popup": "dist/src/popup.html"
+  },
+  "background": {
+    "service_worker": "dist/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://n.news.naver.com/mnews/article/*", "http://localhost:8080/*"],
+      "js": ["dist/content-script.js"]
+    }
+  ],
+  "side_panel": {
+    "default_path": "dist/src/side-panel.html"
+  },
+  "icons": {
+    "16": "images/icon-16.png",
+    "48": "images/icon-48.png",
+    "128": "images/icon-128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "html/side-panel.html",
+        "dist/side-panel.js",
+        "dist/popup.js",
+        "dist/globals.js",
+        "dist/assets/globals.css"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

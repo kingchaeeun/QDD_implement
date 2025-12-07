@@ -1,0 +1,1 @@
+import{R as t,j as e,a as s}from"./globals.js";const r=()=>e.jsxs("div",{className:"p-4 text-center",children:[e.jsx("h1",{children:"Quote Origin Pipeline"}),e.jsx("p",{children:"사이드 패널을 확인해주세요."})]}),c=t.createRoot(document.getElementById("app"));c.render(e.jsx(s.StrictMode,{children:e.jsx(r,{})}));

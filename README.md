@@ -1,7 +1,8 @@
 # Quote Origin Pipeline
 
 네이버 뉴스 기사에서 **직접 인용문을 자동으로 감지**하고,  
-FastAPI 백엔드로 **원문 후보(출처 URL + 문장)** 를 찾아주는 프로젝트입니다.
+FastAPI 백엔드로 **원문 후보(출처 URL + 문장)** 를 찾아준 뒤,  
+인용 왜곡 탐지 모델(QuoteMiningDetection 기반 RoBERTa 분류기)로 **왜곡 확률 점수**까지 계산하는 프로젝트입니다.
 
 - 프론트엔드: 크롬 익스텐션 (React + Vite + TypeScript)
 - 백엔드: FastAPI 기반 `qdd2` 패키지
@@ -70,10 +71,11 @@ npm run build
    - 컨텐트 스크립트가 페이지 오른쪽에 iframe 사이드패널을 생성 (`html/side-panel.html`)
    - 선택된 인용문 전체 텍스트 + 기사 본문을 백엔드로 전송 (`find_origin` 메시지)
 5. `background.ts` 가 메시지를 받아 FastAPI `/api/find-origin` 호출
-   - 응답을 `{ quote_id, quote, original_span, similarity_score(0~100), source_url }[]` 형태로 변환
-   - `display_results` 메시지로 사이드패널에 전달
+   - 응답을  
+     `{ quote_id, quote, original_span, similarity_score(0~1), distortion_score(0~1), is_distorted, source_url }[]`  
+     형태로 매핑해 사이드패널에 전달
 6. `SidePanel.tsx` 가 로딩/결과 카드를 렌더링
-   - 각 카드에 원문 span, 유사도(%), 출처 URL 표시
+   - 각 카드에 원문 span, **유사도(%), 인용 왜곡 확률(%), 출처 URL** 표시
 
 ---
 

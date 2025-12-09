@@ -8,6 +8,7 @@ NER_MODEL_NAME = "monologg/koelectra-base-v3-naver-ner"
 KEYBERT_MODEL_NAME = "snunlp/KR-SBERT-V40K-klueNLI-augSTS"
 TRANSLATION_MODEL_NAME = "Helsinki-NLP/opus-mt-ko-en"
 SENTENCE_MODEL_NAME = "sentence-transformers/all-mpnet-base-v2"
+QUOTE_MINING_MODEL_NAME = "roberta-base"
 
 # Device configuration: 0 = CPU, >0 for GPU (aligns with transformers pipeline)
 DEFAULT_DEVICE = 0

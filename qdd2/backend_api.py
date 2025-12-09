@@ -20,6 +20,7 @@ from qdd2.models import (
     get_translation_models,
     get_sentence_model,
 )
+from qdd2.quote_mining import get_quote_mining_model, score_quote_pair
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -48,6 +49,8 @@ class CandidateResult(BaseModel):
     similarity_score: float  # 유사도 점수 (0~1)
     source_url: str  # 출처 URL
     best_sentence: Optional[str] = None  # 중심 문장
+    distortion_score: Optional[float] = None  # 왜곡 확률 (1 클래스 확률)
+    is_distorted: Optional[bool] = None      # 왜곡 여부 (thresholded)
 
 
 class QuoteResponse(BaseModel):
@@ -75,12 +78,19 @@ async def preload_models() -> None:
     서버 기동 시 한 번만 주요 모델을 미리 로드해서
     첫 요청 지연(koelectra/KeyBERT/번역/SBERT 로딩)을 줄인다.
     """
-    logger.info("[Startup] Preloading NER / keyword / translation / sentence models...")
+    logger.info("[Startup] Preloading NER / keyword / translation / sentence / quote-mining models...")
     # Lazy-load caches; 실제로는 @lru_cache 때문에 한 번만 로드됨
     get_ner_pipeline()
     get_keyword_model()
     get_translation_models()
     get_sentence_model()
+    # Quote-mining classifier (RoBERTa-base fine-tuned)
+    try:
+        get_quote_mining_model()
+        logger.info("[Startup] Quote-mining model loaded.")
+    except Exception as e:
+        # 모델이 없어도 API는 동작하게 두고, 추론 시에만 경고를 띄운다.
+        logger.warning(f"[Startup] Quote-mining model preload failed: {e}")
     logger.info("[Startup] Model preload complete.")
 
 
@@ -279,15 +289,45 @@ async def find_quote_origin(request: QuoteRequest) -> QuoteResponse:
 
         # ==================== Step 9: 결과 변환 ====================
         top_k_candidates = best_span.get("top_k_candidates", [])
-        
+
         candidate_results = []
         for idx, cand in enumerate(top_k_candidates[:request.top_matches]):
+            span_text = cand.get("span_text", "") or cand.get("best_sentence", "")
+
+            # ==================== 왜곡 점수 계산 (QuoteMiningDetection) ====================
+            distortion_score = None
+            is_distorted = None
+            if span_text:
+                try:
+                    distortion = score_quote_pair(
+                        quote_text=quote_en,
+                        origin_span_text=span_text,
+                    )
+                    # 백엔드에서는 모델이 반환한 확률을 그대로 사용하고,
+                    # UI에서 원하는 자리수로 포맷팅한다.
+                    distortion_score = float(distortion["prob_distorted"])
+                    is_distorted = distortion["is_distorted"]
+                    logger.info(
+                        "[API] Distortion score url=%s prob_distorted=%.8f is_distorted=%s",
+                        cand.get("url", ""),
+                        distortion_score,
+                        is_distorted,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[API] Distortion scoring failed for url=%s: %s",
+                        cand.get("url", ""),
+                        e,
+                    )
+
             result_item = CandidateResult(
                 candidate_index=idx,  # 0부터 시작
-                original_span=cand.get("span_text", "") or cand.get("best_sentence", ""),
+                original_span=span_text,
                 similarity_score=round(cand.get("best_score", 0.0), 4),
                 source_url=cand.get("url", ""),
                 best_sentence=cand.get("best_sentence", None),
+                distortion_score=distortion_score,
+                is_distorted=is_distorted,
             )
             candidate_results.append(result_item)
 

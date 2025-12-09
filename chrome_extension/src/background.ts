@@ -59,7 +59,11 @@ class BackgroundManager {
       quote_id: json.quote_id,
       quote: json.quote_content, // 기존 UI에서 사용하던 필드명 유지
       original_span: cand.original_span,
+      // 유사도는 여전히 % 단위 정수로 표시
       similarity_score: Math.round((cand.similarity_score ?? 0) * 100),
+      // 왜곡 점수는 0~1 확률 값을 그대로 유지하고, UI에서 자리수 포맷팅
+      distortion_score: typeof cand.distortion_score === "number" ? cand.distortion_score : null,
+      is_distorted: typeof cand.is_distorted === "boolean" ? cand.is_distorted : null,
       source_url: cand.source_url,
     }));
 

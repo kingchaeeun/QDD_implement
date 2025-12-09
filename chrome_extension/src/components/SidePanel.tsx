@@ -56,27 +56,50 @@ export const SidePanel: React.FC<SidePanelProps> = ({ quote }) => {
 
         {!isLoading && results.length > 0 && (
           <div className="space-y-3">
-            {results.map((result, idx) => (
-              <div key={idx} className="p-3 border border-border rounded-lg">
-                <div className="flex justify-between items-start gap-2 mb-1">
-                  <p className="text-xs font-medium line-clamp-3">
-                    "{result.original_span || result.quote || quote}"
-                  </p>
-                  <span
-                    className={`text-xs font-semibold px-2 py-1 rounded ${
-                      result.similarity_score >= 70
-                        ? "bg-green-100 text-green-800"
-                        : result.similarity_score >= 50
-                        ? "bg-blue-100 text-blue-800"
-                        : "bg-orange-100 text-orange-800"
-                    }`}
-                  >
-                    {result.similarity_score}%
-                  </span>
+            {results.map((result, idx) => {
+              const similarity = result.similarity_score ?? 0;
+              // distortion_score는 0~1 확률 값으로 들어온다.
+              const distortionProb: number | null =
+                typeof result.distortion_score === "number" ? result.distortion_score : null;
+              const distortionPercent = distortionProb !== null ? distortionProb * 100 : null;
+
+              const similarityColor =
+                similarity >= 70
+                  ? "bg-green-100 text-green-800"
+                  : similarity >= 50
+                  ? "bg-blue-100 text-blue-800"
+                  : "bg-orange-100 text-orange-800";
+
+              const distortionColor =
+                distortionPercent === null
+                  ? "bg-gray-100 text-gray-700"
+                  : distortionPercent >= 70
+                  ? "bg-red-100 text-red-800"
+                  : distortionPercent >= 40
+                  ? "bg-yellow-100 text-yellow-800"
+                  : "bg-emerald-100 text-emerald-800";
+
+              return (
+                <div key={idx} className="p-3 border border-border rounded-lg space-y-1.5">
+                  <div className="flex justify-between items-start gap-2">
+                    <p className="text-xs font-medium line-clamp-3">
+                      "{result.original_span || result.quote || quote}"
+                    </p>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${similarityColor}`}>
+                        유사도 {similarity}%
+                      </span>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded ${distortionColor}`}>
+                        {/* 예: 45.16% 처럼 소수점 둘째 자리에서 반올림 */}
+                        왜곡{" "}
+                        {distortionPercent !== null ? `${distortionPercent.toFixed(2)}%` : "N/A"}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground truncate">{result.source_url}</p>
                 </div>
-                <p className="text-xs text-muted-foreground truncate">{result.source_url}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

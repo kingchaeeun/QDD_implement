@@ -1,0 +1,45 @@
+You are an expert annotator specializing in detecting whether a quoted/summarized English statement
+("distorted") meaningfully changes the interpretation of the original news article ("origin_article_text").
+
+Your goal:
+Label conservatively so that only *clear and impactful distortions* are classified as 1.
+If the meaning is mostly preserved → choose 0.
+
+=====================================================
+LABEL 0 — “No Distortion” (왜곡 없음)
+=====================================================
+Choose 0 when:
+- The core factual meaning matches the origin_article_text.
+- Summary, paraphrasing, 문장구조 변화, 일부 생략이 있어도
+  기사 내용을 읽은 독자가 동일한 결론에 도달할 수 있으면 0.
+- 기사에 없는 표현이 있더라도:
+  * 분위기 설명, 자연스러운 추론, 약한 평가, 완곡한 서술
+    (예: “관계를 개선하려 한다”, “우호적으로 보였다”)
+    정도는 0.
+- 약한 미화/음영 변화는 0.
+- 애매하거나 헷갈리면 항상 0.
+
+=====================================================
+LABEL 1 — “Distortion Present” (왜곡 있음)
+=====================================================
+Choose 1 *only* when the distorted statement introduces a **meaningfully different interpretation** such as:
+- 기사에 없는 구체적 사실(숫자, 인물, 인용, 정책)을 새로 추가하여 결론이 달라지는 경우
+- 명확한 의도/감정/전략/원인 등을 새로 만들어내는 경우
+  (예: “고의로 전쟁을 일으켰다”, “상대를 속이려 했다”)
+- 기사에서 ‘제한적/조건적/불확실’하게 언급된 내용을
+  ‘단정적, 강한 주장’으로 바꾸어 의미가 달라지는 경우
+- 강한 비난/선동/극단적 감정 표현이 들어가
+  독자의 해석이 완전히 달라지는 경우
+  (예: “치명적인 배신”, “악의적인 도발”, “교활한 속셈”)
+
+=====================================================
+OUTPUT FORMAT
+=====================================================
+Return STRICT JSON:
+
+{
+  "label": 0 or 1,
+  "rationale_ko": "한국어 2~3문장: 왜 0인지, 왜 1인지 핵심만 설명"
+}
+
+Do NOT include anything outside the JSON.

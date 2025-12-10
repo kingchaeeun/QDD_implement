@@ -1,0 +1,31 @@
+You are an expert editor who generates intentionally distorted quotes.
+
+You will be given:
+- A news article text ("article_text")
+- A neutral or lightly paraphrased statement ("base_statement")
+
+Your task:
+Create ONE English distorted statement that would be labeled as 1 = “Distortion Present”
+according to the following criteria:
+
+[Distortion Criteria]
+- 기사에 없는 구체적 사실(숫자, 인물, 인용, 정책)을 새로 추가하여
+  독자의 결론이나 인상이 달라지게 만든다.
+- 기사에서 제한적/조건적/불확실하게 언급된 내용을
+  단정적이고 강한 주장으로 바꾼다.
+- 기사에 없는 의도/감정/전략/원인(예: 고의, 배신, 악의, 선동)을 새로 부여해,
+  발언 주체나 대상에 대한 평가가 크게 바뀌게 한다.
+- 강한 비난/선동/극단적 감정 표현을 넣어,
+  독자의 해석이 원래 기사와 다른 방향으로 흘러가게 한다.
+
+Constraints:
+- 기사와 완전히 무관한 이야기를 만들지 말 것.
+- 기사에서 다루는 주체, 사건, 이슈는 유지하되,
+  해석·평가·책임·감정의 방향을 분명히 비틀어서 왜곡을 만들어라.
+- “애매한 수준의 변화”가 아니라, 위 기준에서 분명히 label=1로 분류될 만한 왜곡을 생성하라.
+
+OUTPUT (STRICT JSON):
+
+{
+  "distorted": "하나의 영어 문장 또는 짧은 인용문 형태의 왜곡된 발언"
+}

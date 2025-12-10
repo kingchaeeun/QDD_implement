@@ -313,6 +313,10 @@ class ContentScriptManager {
         }
         this.detector.highlightQuotes(quotes);
         this.addQuoteClickListeners(quotes);
+        // 기사에 진입했을 때, 페이지 내 모든 직접 인용문에 대해
+        // 백엔드 파이프라인(find-origin)을 한 번씩 돌려준다.
+        // (UI는 마지막 요청만 보여주지만, 백엔드 로그/데이터는 모든 인용문 기준으로 남는다.)
+        this.runBackendForAllQuotes(quotes);
     }
     addQuoteClickListeners(quotes) {
         const quoteMap = new Map(quotes.map((q) => [q.id, q]));
@@ -393,6 +397,42 @@ class ContentScriptManager {
         // 간단한 키워드 추출 (공백으로 분리된 주요 단어)
         const words = text.split(/\s+/);
         return words.filter((word) => word.length > 3).slice(0, 10);
+    }
+    /**
+     * 기사 내에서 감지된 모든 인용문에 대해 백엔드 파이프라인을 실행한다.
+     * - 요청은 순차적으로 보내서 서버 부하를 피한다.
+     * - 각 인용문에 대한 결과는 백엔드 로그 및 background 최신 결과로만 사용된다.
+     */
+    runBackendForAllQuotes(quotes) {
+        if (!quotes.length)
+            return;
+        const articleData = this.extractArticleData();
+        const processSequentially = async () => {
+            for (const q of quotes) {
+                const fullQuote = this.detector.getFullQuote(q.id) ?? q.quote;
+                await new Promise((resolve) => {
+                    chrome.runtime.sendMessage({
+                        action: "find_origin",
+                        payload: {
+                            quote_id: q.id,
+                            quote_content: fullQuote,
+                            article_text: articleData.content,
+                            article_url: window.location.href,
+                            article_title: articleData.title,
+                            keywords: articleData.keywords,
+                        },
+                    }, (response) => {
+                        if (!response?.success) {
+                            console.error("Background find_origin failed (bulk):", response?.error);
+                        }
+                        resolve();
+                    });
+                });
+            }
+        };
+        processSequentially().catch((err) => {
+            console.error("Error while running bulk quote analysis:", err);
+        });
     }
 }
 // 초기화

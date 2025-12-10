@@ -14,6 +14,14 @@ class BackgroundManager {
             writable: true,
             value: false
         });
+        // quote_id별로 백엔드 결과를 캐싱해서, 동일 인용문 재요청 시
+        // 백엔드를 다시 호출하지 않고 즉시 반환한다.
+        Object.defineProperty(this, "cacheByQuoteId", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: {}
+        });
     }
     initialize() {
         chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
@@ -45,6 +53,13 @@ class BackgroundManager {
         });
     }
     async handleFindOrigin(payload) {
+        const quoteId = payload.quote_id;
+        // 이미 캐시된 결과가 있으면, 백엔드를 다시 호출하지 않고 즉시 반환
+        if (quoteId && this.cacheByQuoteId[quoteId]) {
+            this.latestResults = this.cacheByQuoteId[quoteId];
+            this.isLoading = false;
+            return this.cacheByQuoteId[quoteId];
+        }
         this.isLoading = true;
         const response = await fetch("http://localhost:8000/api/find-origin", {
             method: "POST",
@@ -70,6 +85,9 @@ class BackgroundManager {
             source_url: cand.source_url,
         }));
         this.latestResults = mappedResults;
+        if (quoteId) {
+            this.cacheByQuoteId[quoteId] = mappedResults;
+        }
         this.isLoading = false;
         return mappedResults;
     }

@@ -59,6 +59,10 @@ class QuoteResponse(BaseModel):
     quote_content: str
     candidates: List[CandidateResult]
     best_candidate: Optional[CandidateResult] = None  # 최고 점수 후보
+    # 전체 후보 중 가장 높은 왜곡 점수 (0~100 스케일, 소수점 2자리 정도)
+    max_distortion_score: Optional[float] = None
+    # 전체 후보 기준 인용문 라벨: "distorted" 또는 "normal"
+    label: Optional[str] = None
     error: Optional[str] = None
     debug_info: Optional[dict] = None  # 디버그 정보
 
@@ -333,6 +337,22 @@ async def find_quote_origin(request: QuoteRequest) -> QuoteResponse:
 
         best_candidate = candidate_results[0] if candidate_results else None
 
+        # ==================== Step 10: 인용문 단위 왜곡 라벨 산출 ====================
+        max_distortion_prob = None
+        for cand in candidate_results:
+            if cand.distortion_score is None:
+                continue
+            if max_distortion_prob is None or cand.distortion_score > max_distortion_prob:
+                max_distortion_prob = cand.distortion_score
+
+        max_distortion_score = None
+        label = None
+        if max_distortion_prob is not None:
+            # 모델 확률(0~1)을 0~100 점수로 변환
+            max_distortion_score = round(max_distortion_prob * 100.0, 2)
+            # 제일 높은 왜곡 점수가 50점 이상이면 distorted, 아니면 normal
+            label = "distorted" if max_distortion_score >= 50.0 else "normal"
+
         logger.info(
             f"[API] Success: found {len(candidate_results)} candidates, "
             f"best_score={best_candidate.similarity_score if best_candidate else 'N/A'}"
@@ -345,6 +365,8 @@ async def find_quote_origin(request: QuoteRequest) -> QuoteResponse:
             quote_content=request.quote_content,
             candidates=candidate_results,
             best_candidate=best_candidate,
+            max_distortion_score=max_distortion_score,
+            label=label,
             error=None,
             debug_info=debug_info,
         )

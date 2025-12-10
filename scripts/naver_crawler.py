@@ -1,15 +1,16 @@
 """
-Naver News '세계(104)' 섹션 크롤러 모듈.
+Naver News 'World (104)' Section Crawler Module.
 
-- 헤드라인에 직접 인용문(따옴표)이 있는 기사만 필터링
-- 국내 경제/부동산 관련 키워드는 제외
-- 결과: category, title, date, content, url 컬럼을 가진 DataFrame 반환
+[파일 설명]
+네이버 뉴스 '세계' 섹션(SID=104)의 기사 목록을 날짜별로 순회하며 수집합니다.
+QDD2 프로젝트의 목적에 맞게 '인용문이 포함된 기사'만 선별적으로 저장합니다.
 
-사용 예시 (다른 모듈에서):
+[주요 기능]
+1. 날짜 범위 지정 (과거 -> 최신 역순 혹은 지정 범위)
+2. 헤드라인(제목)에 직접 인용문(" ")이 있는 기사만 필터링
+3. 국내 경제/부동산 관련 노이즈 데이터 제거
+4. CSV 저장을 위한 DataFrame 반환
 
-    from qdd2.naver_crawler import crawl_world_articles
-
-    df_articles = crawl_world_articles(num_articles=50, days_back=60)
 """
 
 import re
@@ -23,32 +24,31 @@ import pandas as pd
 from urllib.parse import urlparse, parse_qs
 
 # -------------------------------------------------------------------
-# 0. 전역 설정
-# -------------------------------------------------------------------
+# 0. 전역 설정 (Global Settings)
+# --------------------------------------------------------------------
 
 BASE_URL = "https://news.naver.com"
-WORLD_SID1 = "104"  # 세계 섹션 코드
+WORLD_SID1 = "104"  # 네이버 뉴스 '세계' 섹션 ID
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/121.0.0.0 Safari/537.36"
 )
 
+# 세션 설정 (헤더 재사용으로 차단 확률 낮춤)
 session = requests.Session()
 session.headers.update({"User-Agent": USER_AGENT})
 
 
 def is_world_section_url(url: str) -> bool:
     """
-    기사 URL이 실제로 '세계(104) 섹션'인지 sid 파라미터로 확인.
-    - n.news.naver.com/mnews/article/.../?sid=104
-    - news.naver.com/main/read.naver?...&sid1=104
-    둘 다 처리.
+    URL 파라미터를 분석하여 '세계(104)' 섹션 기사인지 확인합니다.
+    다른 섹션(정치, 경제 등) 기사가 섞여 들어오는 것을 방지합니다.
     """
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
 
-    # mnews: sid / main: sid1 둘 다 고려
+    # 모바일(mnews)은 'sid', PC버전(main)은 'sid1' 파라미터를 사용함
     sid_vals = qs.get("sid") or qs.get("sid1")
     if not sid_vals:
         return False
@@ -57,38 +57,34 @@ def is_world_section_url(url: str) -> bool:
 
 
 # -------------------------------------------------------------------
-# 1. 유틸 함수
+# 1. 텍스트 처리 유틸 함수 (Text Utilities)
 # -------------------------------------------------------------------
 
 def clean_text(text: Optional[str]) -> str:
     """
-    기사 본문 정제:
-      - 괄호/대괄호 안 내용 제거
-      - 다중 공백 제거
-      - 저작권 문구/하단 링크 제거 등
+    기사 본문에서 불필요한 정보(기자 이메일, 저작권, 광고 등)를 정제합니다.
     """
     if not text:
         return ""
 
-    text = re.sub(r"\([^)]+\)", "", text)       # ( ... )
-    text = re.sub(r"\[[^\]]+\]", "", text)      # [ ... ]
-    text = re.sub(r"\s{2,}", " ", text)         # 다중 공백
-    text = re.sub(r"ⓒ.*?무단전재.*", "", text)  # 저작권 문구
-    text = re.sub(r"▶.*", "", text)             # 하단 유도 링크 등
+    text = re.sub(r"\([^)]+\)", "", text)  # 괄호와 그 안의 내용 제거 (예: (서울=연합뉴스))
+    text = re.sub(r"\[[^\]]+\]", "", text)  # 대괄호와 그 안의 내용 제거 [ ... ]
+    text = re.sub(r"\s{2,}", " ", text)  # 공백이 2개 이상이면 1개로 줄임
+    text = re.sub(r"ⓒ.*?무단전재.*", "", text)  # 일반적인 저작권 문구 제거
+    text = re.sub(r"▶.*", "", text)  # 하단 '클릭하세요' 류의 링크 텍스트 제거
 
     return text.strip()
 
 
 def extract_date_ymd(raw_date: Optional[str]) -> str:
     """
-    다양한 포맷의 날짜 문자열에서 'YYYY.MM.DD'만 추출.
-    예:
-      - '2024.12.02. 오전 10:31'  -> '2024.12.02'
-      - '2024-12-02 10:31:00'     -> '2024.12.02'
+    '2024.12.02. 오전 10:31' 같은 다양한 날짜 문자열에서
+    '2024.12.02' 형태의 날짜만 깔끔하게 추출합니다.
     """
     if not raw_date:
         return ""
 
+    # 정규표현식: 숫자4개(연) + 구분자 + 숫자2개(월) + 구분자 + 숫자2개(일)
     m = re.search(r"(\d{4})[.\-](\d{2})[.\-](\d{2})", raw_date)
     if m:
         yyyy, mm, dd = m.groups()
@@ -98,7 +94,8 @@ def extract_date_ymd(raw_date: Optional[str]) -> str:
 
 def get_html(url: str, max_retry: int = 3, sleep: float = 0.5) -> Optional[str]:
     """
-    단순 HTML GET + 재시도 로직.
+    URL에 요청을 보내 HTML을 가져옵니다.
+    네이버 서버가 일시적으로 응답하지 않을 경우를 대비해 재시도(Retry) 로직을 포함합니다.
     """
     for _ in range(max_retry):
         try:
@@ -112,15 +109,13 @@ def get_html(url: str, max_retry: int = 3, sleep: float = 0.5) -> Optional[str]:
 
 def has_direct_quote(text: str, min_chars: int = 3) -> bool:
     """
-    직접 인용문(큰따옴표) 존재 여부를 판단.
-    - “ ”, 『 』, 「 」 등은 전부 " 로 통일 후 처리
-    - 따옴표 안에 한글/영문 문자가 min_chars개 이상 있을 때만 True
-    - 여기서는 '제목(헤드라인)'에 쓰는 것을 전제
+    문자열(주로 제목)에 직접 인용문(큰따옴표)이 포함되어 있는지 검사합니다.
+    QDD2 데이터셋은 '누가 뭐라고 말했다'는 인용문 검증이 핵심이므로 중요합니다.
     """
     if not text:
         return False
 
-    # 다양한 따옴표를 " 로 통일
+    # 특수 따옴표들을 표준 큰따옴표(")로 통일
     normalized = (
         text.replace("“", '"')
             .replace("”", '"')
@@ -132,10 +127,11 @@ def has_direct_quote(text: str, min_chars: int = 3) -> bool:
             .replace("』", '"')
     )
 
-    # " ... " 구간 추출
+    # 따옴표 안에 있는 내용물만 추출
     segments = re.findall(r'"([^"]+)"', normalized)
 
     for seg in segments:
+        # 따옴표 안에 최소 3글자 이상의 의미 있는(한글/영어) 내용이 있어야 함
         meaningful_chars = re.findall(r"[가-힣A-Za-z]", seg)
         if len(meaningful_chars) >= min_chars:
             return True
@@ -144,16 +140,12 @@ def has_direct_quote(text: str, min_chars: int = 3) -> bool:
 
 
 # -------------------------------------------------------------------
-# 2. 기사 본문 수집
+# 2. 개별 기사 본문 수집 (Article Scraper)
 # -------------------------------------------------------------------
 
 def get_article_content(url: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
-    개별 기사 페이지에서
-      - 제목
-      - 날짜 (YYYY.MM.DD)
-      - 정제된 본문
-    을 추출.
+    기사 상세 페이지 URL로 접속하여 제목, 날짜, 본문을 가져옵니다.
     """
     try:
         html = get_html(url)
@@ -162,7 +154,7 @@ def get_article_content(url: str) -> Tuple[Optional[str], Optional[str], Optiona
 
         soup = BeautifulSoup(html, "html.parser")
 
-        # 1) 제목
+        # 1) 제목 추출 (네이버 뉴스 구조에 따른 선택자
         title = None
         title_area = soup.find(id="title_area")
         if title_area:
@@ -173,7 +165,7 @@ def get_article_content(url: str) -> Tuple[Optional[str], Optional[str], Optiona
             if h2:
                 title = h2.get_text(strip=True)
 
-        # 2) 날짜
+        # 2) 날짜 추출
         date_tag = (
             soup.select_one(".media_end_head_info_datestamp_time")
             or soup.select_one("span.t11")
@@ -182,7 +174,7 @@ def get_article_content(url: str) -> Tuple[Optional[str], Optional[str], Optiona
         raw_date = date_tag.get_text(strip=True) if date_tag else None
         date_str = extract_date_ymd(raw_date)
 
-        # 3) 본문
+        # 3) 본문 추출 및 정제
         content_tag = soup.find(id="dic_area") or soup.find("article")
         content = clean_text(content_tag.get_text()) if content_tag else None
 
@@ -196,23 +188,23 @@ def get_article_content(url: str) -> Tuple[Optional[str], Optional[str], Optiona
 
 
 # -------------------------------------------------------------------
-# 3. 필터 조건 (헤드라인 기준)
+# 3. 필터링 로직 (Filter Condition)
 # -------------------------------------------------------------------
 
 def check_conditions(title: str, content: str) -> bool:
     """
-    필터 조건:
-    1. 헤드라인(제목)에 직접 인용문이 있을 것
-    2. 국내 경제/부동산 관련 키워드가 포함된 기사는 제외
+    수집된 기사를 저장할지 말지 결정하는 필터입니다.
+    1. 제목에 인용문이 있어야 함
+    2. 국내 이슈(부동산, 국내경제)는 제외함
     """
     if not title or not content:
         return False
 
-    # 1) 제목에 직접 인용문(큰따옴표) 있어야 함
+    # 조건 1) 제목에 직접 인용문(큰따옴표) 존재 여부
     if not has_direct_quote(title):
         return False
 
-    # 2) 국내 경제/부동산 관련 키워드 제외
+    # 조건 2) 세계 뉴스에 섞여 들어온 국내 경제/부동산 키워드 제외
     exclude_keywords = [
         "부동산", "아파트", "전세", "월세", "청약", "분양",
         "재건축", "국토부", "LH", "집값", "공시가격",
@@ -229,46 +221,31 @@ def check_conditions(title: str, content: str) -> bool:
 
 
 # -------------------------------------------------------------------
-# 4. 전체 크롤링 파이프라인
+# 4. 크롤러 메인 파이프라인 (Crawler Main)
 # -------------------------------------------------------------------
 
 def crawl_world_articles(
-    num_articles: int = 100,
-    days_back: int = 90,
-    start_date: Optional[str] = None,   # YYYYMMDD 또는 YYYY-MM-DD
-    end_date: Optional[str] = None,     # YYYYMMDD 또는 YYYY-MM-DD
+    num_articles: int = 100,            # 수집 목표 개수
+    days_back: int = 90,                # 며칠 전까지 검색할지 (날짜 지정 안 했을 때)
+    start_date: Optional[str] = None,   # 시작 날짜 (YYYY-MM-DD)
+    end_date: Optional[str] = None,     # 종료 날짜 (YYYY-MM-DD)
 ) -> pd.DataFrame:
     """
-    세계(104) 섹션에서,
-    - 날짜, 페이지를 순차적으로 훑어가며
-    - 헤드라인에 직접 인용문이 있는 기사만
-    - num_articles개 채워질 때까지 수집 후 즉시 종료.
-
-    날짜 설정 규칙:
-      - start_date, end_date 둘 다 주면: 그 구간(과거~최신)만 탐색
-      - 둘 다 없으면: today 기준 days_back일만큼 과거로 내려가며 탐색
-
-    ★ 기사 개별 페이지에서 뽑은 실제 날짜(art_date)를 기준으로
-      지정한 날짜 범위 밖이면 저장하지 않음.
-    반환: DataFrame(columns=["category", "title", "date", "content", "url"])
+    세계(104) 섹션을 순회하며 조건에 맞는 기사를 수집합니다.
     """
     data = {"category": [], "title": [], "date": [], "content": [], "url": []}
     collected_count = 0
-    visited: set[str] = set()
+    visited: set[str] = set()   # 중복 수집 방지용 방문 기록
 
     print(">>> 기사 수집 시작 (세계 섹션, 헤드라인 직접 인용문 필터)...")
 
-    # ---------------------------------------------------------
-    # 1) 날짜 범위 설정 (list.naver에 넘길 date_list)
-    #    + 실제 기사 날짜 필터에 쓸 allowed_start_dt / allowed_end_dt
-    # ---------------------------------------------------------
+    # [Step 1] 탐색할 날짜 리스트 생성
     date_list: list[str] = []
-
     allowed_start_dt: Optional[datetime] = None
     allowed_end_dt: Optional[datetime] = None
 
     if start_date and end_date:
-        # 하이픈 허용: "2024-12-01" -> "20241201"
+        # 사용자가 날짜 범위를 직접 지정한 경우
         start_norm = start_date.replace("-", "")
         end_norm = end_date.replace("-", "")
 
@@ -276,23 +253,24 @@ def crawl_world_articles(
             start_dt = datetime.strptime(start_norm, "%Y%m%d")
             end_dt = datetime.strptime(end_norm, "%Y%m%d")
         except ValueError:
-            print("[ERROR] 날짜 포맷이 잘못되었습니다. YYYYMMDD 또는 YYYY-MM-DD 형식이어야 합니다.")
+            print("[ERROR] 날짜 포맷 오류. YYYYMMDD 또는 YYYY-MM-DD 형식이어야 합니다.")
             return pd.DataFrame(data)
 
-        # start_dt가 더 최신, end_dt가 더 과거가 되도록 정렬
+        # start_dt를 '최신 날짜', end_dt를 '과거 날짜'로 정렬 (네이버 뉴스는 최신->과거 순 탐색이 유리)
         if start_dt < end_dt:
             start_dt, end_dt = end_dt, start_dt
 
-        allowed_start_dt = end_dt
-        allowed_end_dt = start_dt
+        allowed_start_dt = end_dt   # 범위의 가장 과거
+        allowed_end_dt = start_dt   # 범위의 가장 최신
 
+        # 최신 날짜부터 과거 날짜로 리스트 생성
         n_days = (start_dt - end_dt).days
         for i in range(n_days + 1):
             day = start_dt - timedelta(days=i)
             date_list.append(day.strftime("%Y%m%d"))
 
     else:
-        # 기존 days_back 로직 유지 (start/end 미지정 시)
+        # 날짜 지정이 없으면 오늘부터 days_back 만큼 과거로
         today = datetime.today()
         allowed_end_dt = today
         allowed_start_dt = today - timedelta(days=days_back - 1)
@@ -301,9 +279,7 @@ def crawl_world_articles(
             date = today - timedelta(days=d)
             date_list.append(date.strftime("%Y%m%d"))
 
-    # ---------------------------------------------------------
-    # 2) 날짜 루프 시작
-    # ---------------------------------------------------------
+    # [Step 2] 날짜별 -> 페이지별 순회
     for date_str in date_list:
         if collected_count >= num_articles:
             break
@@ -311,9 +287,11 @@ def crawl_world_articles(
         page = 1
 
         while True:
+            # 목표량 채웠으면 전체 종료
             if collected_count >= num_articles:
                 break
 
+            # 네이버 뉴스 리스트 URL 생성
             list_url = (
                 f"{BASE_URL}/main/list.naver"
                 f"?mode=LSD&mid=shm&sid1={WORLD_SID1}"
@@ -325,35 +303,38 @@ def crawl_world_articles(
                 break
 
             soup = BeautifulSoup(html, "html.parser")
-            a_tags = soup.select(
-                "a[href*='/mnews/article/'], a[href*='/read.naver']"
-            )
 
+            # 기사 링크 태그 추출
+            a_tags = soup.select("a[href*='/mnews/article/'], a[href*='/read.naver']")
+
+            # 링크가 하나도 없으면 해당 날짜의 페이지 끝에 도달한 것
             if not a_tags:
                 break
 
-            new_on_page = 0
+            # 이 페이지에서 '실제로 수집된' 개수가 0개여도,
+            # 다음 페이지에는 유효한 기사가 있을 수 있으므로 new_on_page 변수로 break 하지 않음.
+            # 대신 중복 체크 로직을 강화하여 페이지 끝을 감지해야 함.
+            duplicate_count = 0 # 이 페이지의 기사가 모두 이미 본 거라면 종료
 
             for a in a_tags:
                 href = a.get("href")
-                if not href:
-                    continue
+                if not href: continue
                 if href.startswith("/"):
                     href = BASE_URL + href
 
-                # 섹션 필터
                 if not is_world_section_url(href):
                     continue
 
-                # 중복 기사 방지
+                # 이미 수집했거나 확인한 URL이면 건너뜀
                 if href in visited:
+                    duplicate_count += 1
                     continue
                 visited.add(href)
 
-                # 기사 파싱
+                # 기사 내용 가져오기
                 title, art_date, content = get_article_content(href)
 
-                # 기사 날짜가 지정 범위 밖이면 스킵
+                # 날짜 범위 체크 (리스트 날짜와 실제 기사 날짜가 다를 수 있음)
                 if not art_date:
                     continue
 
@@ -370,7 +351,7 @@ def crawl_world_articles(
                     if not (allowed_start_dt <= art_dt <= allowed_end_dt):
                         continue
 
-                # 나머지 기존 필터 (인용문, 국내경제/부동산 등)
+                # 필터 조건 확인 (인용문 제목 등)
                 if title and content and check_conditions(title, content):
                     data["category"].append("세계")
                     data["title"].append(title)
@@ -379,7 +360,6 @@ def crawl_world_articles(
                     data["url"].append(href)
 
                     collected_count += 1
-                    new_on_page += 1
 
                     print(
                         f"[{collected_count}/{num_articles}] 저장 | "
@@ -389,10 +369,13 @@ def crawl_world_articles(
                     if collected_count >= num_articles:
                         break
 
-                time.sleep(0.1)
+                # 서버 부하 방지
+                time.sleep(0.05)
 
-            # 이 페이지에서 새 기사 하나도 못 건졌으면 다음 페이지 의미 없음
-            if new_on_page == 0:
+            # 네이버는 페이지 끝을 넘어가면 이전 페이지 내용을 반복해서 보여주는 경우가 있음
+            # 만약 이 페이지의 모든 링크가 이미 visited에 있다면 더 볼 필요 없음
+            if duplicate_count == len(a_tags):
+                # print(f"   [{date_str}] {page}페이지: 모든 기사가 중복. 날짜 탐색 종료.")
                 break
 
             page += 1
@@ -400,25 +383,25 @@ def crawl_world_articles(
 
         print(f"   [{date_str}] 탐색 완료. 누적 수집: {collected_count}개")
 
-    df = pd.DataFrame(data)
     print(f"\n>>> 최종 수집 완료: {len(df)}개")
-    return df
+    return pd.DataFrame(data)
 
 
 
 # -------------------------------------------------------------------
-# 5. 모듈 단독 실행용 (옵션)
+# 5. 실행부 (CLI 테스트)
 # -------------------------------------------------------------------
 
 if __name__ == "__main__":
     df = crawl_world_articles(
-        num_articles=70,
-        start_date="2025-8-13",  # 또는 "20241201"
-        end_date="2025-8-7",    # 또는 "20241120"
+        num_articles=50,        # 50개 모으면 종료
+        start_date="2025-8-13", # 시작일 (최신)
+        end_date="2025-8-7",    # 종료일 (과거)
     )
 
     if not df.empty:
         filename = "articles.csv"
+        # 엑셀에서 한글 깨짐 방지를 위해 utf-8-sig 인코딩 사용
         df.to_csv(filename, index=False, encoding="utf-8-sig")
         print(f"\n파일 저장 완료: {filename}")
         print(df[["date", "title"]].head())

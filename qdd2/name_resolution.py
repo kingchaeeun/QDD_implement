@@ -88,11 +88,11 @@ def resolve_person_name_en(name_ko: str) -> str:
     # [Step 1] 로컬 인명사전 (가장 빠르고 정확함)
     # -------------------------------------------------------
 
-    # 1-1) 완전 일치 검색 (예: "트럼프")
+    # 1-1) 완전 일치 검색
     if name_ko in PERSON_NAME_LEXICON:
         return PERSON_NAME_LEXICON[name_ko]
 
-    # 1-2) 부분 일치 검색 (예: "미국의 트럼프 당선인")
+    # 1-2) 부분 일치 검색
     # 사전 키가 입력 문자열에 포함되어 있으면 그 값을 사용
     for key, val in PERSON_NAME_LEXICON.items():
         if key in name_ko:

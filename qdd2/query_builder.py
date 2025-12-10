@@ -17,8 +17,6 @@ def _format_date_en(article_date: Optional[str]) -> Tuple[Optional[str], Optiona
     article_date를 문자열로 받아서
     - 원본 문자열 (article_date_str)
     - 영어 포맷(예: November 30, 2025) 을 튜플로 반환
-
-    인식 가능한 포맷: YYYY-MM-DD, YYYY.MM.DD, YYYY/MM/DD
     """
     if article_date is None:
         return None, None
@@ -46,53 +44,53 @@ def _format_date_en(article_date: Optional[str]) -> Tuple[Optional[str], Optiona
 
 def _normalize_token(tok: str) -> str:
     """Normalize token for deduplication: lowercase, strip punctuation/extra spaces."""
+    # 정규화: 구두점/추가 공백 제거, 소문자 변환
     normalized = re.sub(r"[^\w\s]", " ", tok).lower()
+    # 연속된 공백을 하나로 줄이고 앞뒤 공백 제거
     return " ".join(normalized.split()).strip()
 
 
 def _dedupe_preserve(seq: List[str]) -> List[str]:
     """Remove duplicates while preserving order and ignoring empty tokens (punct/space-insensitive)."""
-    seen = set()
+    seen = set()  # 이미 정규화되어 본 토큰을 저장
     out: List[str] = []
     for item in seq:
-        if not item:
+        if not item:  # 빈 문자열(토큰)은 건너뛰기
             continue
-        norm = _normalize_token(item)
-        if not norm or norm in seen:
+        norm = _normalize_token(item)  # 토큰 정규화
+        if not norm or norm in seen:  # 정규화 후 비어있거나 이미 본 토큰이면 건너뛰기
             continue
         seen.add(norm)
-        out.append(item)
+        out.append(item)  # 원본 토큰을 결과 리스트에 추가 (순서 유지)
     return out
 
 
 def generate_search_query(
     entities_by_type: Dict[str, List[str]],
-    keywords: List[Tuple[str, float]],
-    top_k: int = 3,
     quote_sentence: Optional[str] = None,
     article_date: Optional[str] = None,  # YYYY-MM-DD
-    rollcall_mode: bool = False,
     use_wikidata: bool = True
 ) -> Dict[str, Optional[str]]:
     """
-    Build Korean/English search queries using entities + keywords.
+    Build Korean/English search queries using entities (Speaker, Location) only.
+    (Keywords logic removed)
 
-    rollcall_mode=True:
-        → Rollcall 전용 짧은 쿼리:
-            EN: Trump + 핵심 키워드 1개
-            KO: 발화자 + 핵심 키워드 1개
-
-    default:
-        → 기존 일반 모드 쿼리:
-            speaker + location tokens + keyword tokens + optional quoted sentence
+    Structure:
+        speaker + location tokens + optional quoted sentence
     """
+    # ----------------------------------------------------
+    # 1. 날짜 포맷팅 및 화자(Speaker) 정보 추출
+    # ----------------------------------------------------
+    # 날짜 포맷팅 (원본 문자열과 영어 포맷)
     article_date_str, date_en = _format_date_en(article_date)
 
     per_list = entities_by_type.get("PER", [])
     if not per_list:
         return {"ko": None, "en": None}
 
-    speaker_ko = per_list[0]
+    speaker_ko = per_list[0]  # 첫 번째 인물(PER)을 화자로 간주
+
+    # 영어 화자 이름 결정: use_wikidata가 True면 Wikidata에서, 아니면 번역 사용
     if use_wikidata:
         speaker_en = resolve_person_name_en(speaker_ko)
     else:
@@ -101,15 +99,21 @@ def generate_search_query(
         except Exception:
             speaker_en = speaker_ko
 
+    # ----------------------------------------------------
+    # 2. LOC (장소) 정보 추출 및 번역 (최대 2개)
+    # ----------------------------------------------------
     # LOC는 일반 모드에서만 사용할 거라 그대로 둠
-    loc_list = entities_by_type.get("LOC", [])[:2]
-    loc_list = _dedupe_preserve(loc_list)
-    locs_ko = " ".join(loc_list)
+    loc_list = entities_by_type.get("LOC", [])[:2] # 최대 2개 LOC
+    loc_list = _dedupe_preserve(loc_list) # 중복 제거 (순서 보존)
+    locs_ko = " ".join(loc_list) # 한국어 LOC는 공백으로 연결
+
     locs_en_tokens: List[str] = []
     for loc in loc_list:
         try:
             loc_en_full = translate_ko_to_en(loc)
+            # 번역된 결과에서 쉼표 앞 부분만 사용 (예: '서울, 한국' -> '서울')
             loc_en_first = loc_en_full.split(",")[0]
+            # 앞의 2단어까지만 사용 (쿼리 길이 제한)
             loc_en_first = " ".join(loc_en_first.split()[:2])
             if loc_en_first:
                 locs_en_tokens.append(loc_en_first)
@@ -117,20 +121,10 @@ def generate_search_query(
             logger.warning("Location translation failed, falling back to original: %s", loc)
             locs_en_tokens.append(loc)
 
-    # 키워드 상위 top_k
-    top_kws_ko = [kw for kw, _ in keywords[:top_k]]
-    top_kws_ko = _dedupe_preserve(top_kws_ko)
-    kws_en_tokens: List[str] = []
-    for kw_ko in top_kws_ko:
-        try:
-            kw_en_full = translate_ko_to_en(kw_ko)
-            kw_en_trim = " ".join(kw_en_full.split()[:3])
-            if kw_en_trim:
-                kws_en_tokens.append(kw_en_trim)
-        except Exception:
-            logger.warning("Keyword translation failed, falling back to original: %s", kw_ko)
-            kws_en_tokens.append(kw_ko)
 
+    # ----------------------------------------------------
+    # 3. 인용구(Quote) 번역
+    # ----------------------------------------------------
     quote_en_full: Optional[str] = None
     if quote_sentence:
         try:
@@ -138,104 +132,28 @@ def generate_search_query(
         except Exception:
             quote_en_full = None
 
-    # =========================
-    # 1) Rollcall 모드 전용 블록
-    # =========================
-    if rollcall_mode:
-        # Rollcall 쿼리는 "Trump + 핵심 키워드 1개"로 단순화
-        speaker_roll_en = "Trump"
-
-        focus_ko: Optional[str] = top_kws_ko[0] if top_kws_ko else None
-        focus_en_word: Optional[str] = None
-
-        if focus_ko:
-            try:
-                focus_en = translate_ko_to_en(focus_ko)
-                tokens = re.findall(r"[A-Za-z]+", focus_en)
-                if tokens:
-                    focus_en_word = tokens[-1]  # 예: "Violence in Sudan" → "Sudan"
-            except Exception:
-                focus_en_word = None
-
-        if not focus_en_word:
-            focus_en_word = "speech"
-
-        query_en = f"{speaker_roll_en} {focus_en_word}".strip()
-
-        ko_parts = [speaker_ko]
-        if focus_ko:
-            ko_parts.append(focus_ko)
-        query_ko = " ".join(_dedupe_preserve(ko_parts)).strip()
-
-        logger.info("[RollcallQuery] ko=%s", query_ko)
-        logger.info("[RollcallQuery] en=%s", query_en)
-
-        return {"ko": query_ko or None, "en": query_en or None}
-
-    # # =========================
-    # # 1) Rollcall 모드 전용 블록
-    # # =========================
-    # if rollcall_mode and article_date is not None:
-    #
-    #     # article_date_str, date_en 는 함수 시작부에서 _format_date_en 로 이미 계산됨
-    #     # article_date_str: 원본 (예: "2025.11.30")
-    #     # date_en        : "November 30, 2025"
-    #
-    #     # --- (선택) speaker_en 정제 함수 ---
-    #     def normalize_name_en(name: str, max_words: int = 3) -> str:
-    #         import re as _re
-    #         name = _re.sub(r"[^A-Za-z\s]", " ", str(name))
-    #         name = _re.sub(r"\s+", " ", name).strip()
-    #         parts = name.split()
-    #         if not parts:
-    #             return ""
-    #         return " ".join(parts[:max_words])
-    #
-    #     # ===========================
-    #     # 최종 쿼리 구성 (EN / KO)
-    #     # ===========================
-    #     # EN: 발화자 + 날짜
-    #     parts_en = []
-    #     if speaker_en:
-    #         speaker_en_clean = normalize_name_en(speaker_en, max_words=3)
-    #         if speaker_en_clean:
-    #             parts_en.append(speaker_en_clean)
-    #     if date_en:
-    #         parts_en.append(date_en)  # ← 여기
-    #     query_en = " ".join(parts_en).strip() or None
-    #
-    #     # KO: 발화자 + 날짜
-    #     parts_ko = []
-    #     if speaker_ko:
-    #         parts_ko.append(str(speaker_ko))
-    #     if article_date_str:
-    #         parts_ko.append(article_date_str)
-    #     query_ko = " ".join(parts_ko).strip() or None
-    #
-    #     logger.info("[RollcallQuery] ko=%s", query_ko)
-    #     logger.info("[RollcallQuery] en=%s", query_en)
-    #
-    #     # 롤콜 모드에서는 여기서 바로 종료
-    #     return {"ko": query_ko, "en": query_en}
-
-
-    # =========================
-    # 2) 일반 모드 (기존 로직)
-    # =========================
+    # ----------------------------------------------------
+    # 4. 영어(EN) 검색 쿼리 구성
+    # ----------------------------------------------------
+    # 구성: 화자 + 장소 + 인용구 (키워드 제외)
     query_en_tokens: List[str] = _dedupe_preserve(
-        [speaker_en] + locs_en_tokens + kws_en_tokens
+        [speaker_en] + locs_en_tokens
     )
     if quote_en_full:
-        query_en_tokens.append(quote_en_full)
+        query_en_tokens.append(quote_en_full) # 인용구는 끝에 추가
     query_en = " ".join(query_en_tokens).strip()
 
-    query_ko_parts = [speaker_ko]
+    # ----------------------------------------------------
+    # 5. 한국어(KO) 검색 쿼리 구성
+    # ----------------------------------------------------
+    query_ko_parts = [speaker_ko] # 화자
     if locs_ko:
-        query_ko_parts.append(locs_ko)
-    if top_kws_ko:
-        query_ko_parts.append(" ".join(top_kws_ko))
+        query_ko_parts.append(locs_ko) # 장소 토큰
+
     if quote_sentence:
-        query_ko_parts.append(quote_sentence)
+        query_ko_parts.append(quote_sentence) # 인용구
+
+    # 모든 한국어 파트를 합친 후, 공백으로 나누고 다시 중복을 제거하여 최종 쿼리 생성
     query_ko = " ".join(
         _dedupe_preserve(" ".join(query_ko_parts).split())
     ).strip()

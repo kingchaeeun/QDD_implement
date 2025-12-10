@@ -1,5 +1,10 @@
 """
 Google CSE client and page/PDF helpers.
+(구글 검색 엔진 클라이언트 및 웹페이지/PDF 처리 도구)
+
+이 모듈은 다음 두 가지 핵심 역할을 수행합니다:
+1. Google Custom Search JSON API를 사용하여 웹 검색을 수행합니다.
+2. 검색된 URL(HTML 또는 PDF)에 접속하여 본문 텍스트를 추출합니다.
 """
 
 import os
@@ -10,18 +15,25 @@ from typing import Dict, List, Optional
 from urllib.parse import urljoin
 from io import BytesIO
 
-import pdfplumber
+import pdfplumber   # PDF 텍스트 추출 라이브러리
 import requests
 
 from qdd2 import config
 from qdd2.text_utils import contains_korean
 
+# 전역 세션 설정 (HTTP 연결 재사용으로 속도 향상)
 SESSION = requests.Session()
 SESSION.headers.update(config.HTTP_HEADERS)
 
 
 def is_valid_page(url: str, timeout: int = config.DEFAULT_TIMEOUT) -> bool:
+    """
+    [유효성 검사]
+    해당 URL이 접속 가능하고, 내용이 충분한 HTML 페이지인지 확인합니다.
+    (PDF나 바이너리 파일, 빈 페이지 등을 1차로 걸러냄)
+    """
     try:
+        # head 요청 대신 get을 쓰되, 내용은 나중에 확인함
         r = SESSION.get(url, timeout=timeout, allow_redirects=True)
         if r.status_code != 200:
             return False
